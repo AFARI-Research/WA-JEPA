@@ -1,0 +1,35 @@
+# torch / torchvision are intentionally not pinned here because CUDA wheels are
+# environment-specific.
+# torch>=2.1.0
+# torchvision>=0.16.0
+
+# NAVSIM pins numpy==1.23.4, so a higher floor here cannot be satisfied together
+# with it. The evaluation paths are tested on 1.23.4.
+numpy>=1.23.4
+Pillow>=9.0.0
+opencv-python>=4.5.0
+matplotlib>=3.3.0
+einops>=0.7.0
+pyquaternion>=0.9.9
+timm>=0.9.0,<1.0
+
+accelerate>=0.30.0
+omegaconf>=2.3.0
+torchmetrics>=1.0.0
+safetensors>=0.4.0
+# HUGSIM's scenario and camera YAMLs are read directly (close_loop/prep_scenarios.py,
+# close_loop/make_video.py), so this is needed even though omegaconf vendors its own parser.
+PyYAML>=6.0
+
+# Optional: only needed for experiment_tracker: wandb. Training runs with
+# experiment_tracker: none without it.
+wandb>=0.16.0
+tqdm>=4.62.0
+rich>=13.0.0
+
+# NuPlan / NAVSIM are still installed separately when those datasets are used.
+# pip install nuplan-devkit
+# cd navsim && pip install -e .
+#
+# DeepSpeed is optional and environment-sensitive:
+# pip install deepspeed>=0.14.0

@@ -1,0 +1,90 @@
+seed: 42
+tf32: true
+
+name: reset_project
+experiment_name: nuplan_basic
+save_root: results
+checkpoint:
+
+experiment_tracker: none
+wandb:
+  project: world-model
+  run_name:
+  name:
+  entity:
+  mode:
+  dir:
+wandb_project: world-model
+wandb_run_name:
+wandb_entity:
+wandb_mode:
+
+model:
+  # Prefer target for new model code, for example:
+  # target: models.my_model:MyModel
+  target:
+  # Optional registry-based construction.
+  name:
+  dtype: bfloat16
+
+trainer:
+  batch_size_per_gpu: 2
+  max_epochs: 1
+  max_steps: 0
+  eval_only: false
+  log_interval: 50
+  eval_interval: 0.25
+  eval_max_batches: 50
+
+  gradient_accumulation_steps: 1
+  gradient_clipping: 1.0
+  weight_decay: 0.0
+  learning_rate:
+    base: 0.0001
+  lr_warmup_ratio: 0.05
+  freeze_modules:
+  losses: {}
+
+  best_metric: val_total
+  best_mode: min
+  save_checkpoint_every_epoch: true
+  save_checkpoint_steps: []
+
+  mixed_precision: "no"
+  deepspeed_config:
+  dist_timeout_sec: 3600
+
+data:
+  dataset: NUPLAN
+
+  frame_height: 256
+  frame_width: 512
+  num_history_frames:
+  num_history_image_frames: 1
+  num_history_trajectory_steps: 4
+  num_future_frames: 8
+  trajectory_frame_rate_hz: 2.0
+
+  nuplan_data_root:
+  nuplan_cameras: [CAM_F0]
+  nuplan_split: mini
+  nuplan_anchor_stride: 1
+  nuplan_split_ratio: 0.9
+  nuplan_index_build_workers: 1
+  private_data_root:
+
+  navsim_log_path:
+  sensor_blobs_path:
+  navsim_val_log_path:
+  navsim_val_sensor_blobs_path:
+  train_scene_filter_yaml:
+  val_scene_filter_yaml:
+  navsim_window_stride:
+  navsim_val_window_stride:
+  camera_name: cam_f0
+
+  nav_command_infer_mode: arc_length
+  nav_command_forward_m: 10.0
+  nav_command_lateral_m: 2.0
+  nav_command_heading_rad: 0.35
+  nav_command_combine: and

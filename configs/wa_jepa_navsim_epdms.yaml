@@ -1,0 +1,72 @@
+# Evaluation preset for NAVSIM v2 navtest EPDMS.
+#
+# This is the preset associated with the reported seed=1 result (~91.7 EPDMS
+# score in the internal navtest evaluation).  The score is stochastic because
+# flow_inference_seed controls the initial trajectory/scene noise.  Keep the
+# default at 1 for reproducibility of that reported result.
+
+seed: 42
+tf32: true
+checkpoint:
+
+model:
+  target: models.multiview_causal_future_jepa:MultiViewCausalFutureMaskedJEPA
+  dtype: bfloat16
+  vjepa2_ckpt: ${oc.env:VJEPA2_CKPT,/path/to/vjepa2_1_vitl_dist_vitG_384.pt}
+  require_pretrained: true
+  allow_partial_load: false
+  min_checkpoint_load_ratio: 1.0
+  copy_target_encoder_from_student: true
+  driving_condition_adapter: navsim
+  enable_trajectory_head: true
+  init_from_checkpoint:
+  require_init_from_checkpoint: false
+  init_checkpoint_allow_partial: false
+  variant: vjepa2_1_vit_large_384
+  use_rope: true
+  use_sdpa: true
+  interpolate_rope: true
+  modality_embedding: true
+  img_temporal_dim_size: 1
+  use_activation_checkpointing: false
+
+  camera_names: [cam_l0, cam_f0, cam_r0, cam_b0]
+  input_hw: [256, 512]
+  pretrained_input_hw: [256, 256]
+  image_normalization: minus_one_to_imagenet
+  image_mean: [0.485, 0.456, 0.406]
+  image_std: [0.229, 0.224, 0.225]
+  num_history_frames: 4
+  num_future_frames: 8
+  patch_size: 16
+  tubelet_size: 2
+
+  mv_scene_dim: 512
+  flow_hidden_dim: 512
+  flow_num_layers: 12
+  flow_num_heads: 8
+  traj_loss_grad_to_scene_flow: true
+  scene_loss_grad_to_traj_flow: false
+  num_inference_steps: 12
+  flow_time_sampling: logit_normal
+  flow_logit_mean: -0.2
+  flow_logit_std: 1.6
+  full_mask_prob: 1.0
+  flow_inference_noise_scale: 1.0
+  flow_inference_seed: 1
+  dynamic_collapse_topk: 64
+  trajectory_norm_mean: [31.8, 1.32, 0.095]
+  trajectory_norm_std: [33.37, 21.0, 1.765]
+  trajectory_horizon: 8
+  ego_status_dim: 8
+
+data:
+  dataset: NAVSIM_OFFICIAL
+  frame_height: 256
+  frame_width: 512
+  num_future_frames: 8
+  num_history_image_frames: 4
+  num_history_trajectory_steps: 4
+  trajectory_frame_rate_hz: 2.0
+  camera_names: [cam_l0, cam_f0, cam_r0, cam_b0]
+  camera_name: cam_f0

@@ -1,0 +1,152 @@
+seed: 42
+tf32: true
+save_root: ${oc.env:WM_SAVE_ROOT,/path/to/experiments}
+name: causal_future_jepa_mv
+experiment_name: vjepa21_vitl16_4cam_scene512_flow512_l12_xpred_4hist_8future
+experiment_tracker: none
+
+checkpoint:
+
+model:
+  target: models.multiview_causal_future_jepa:MultiViewCausalFutureMaskedJEPA
+  dtype: bfloat16
+
+  vjepa2_ckpt: ${oc.env:VJEPA2_CKPT,/path/to/vjepa2_1_vitl_dist_vitG_384.pt}
+  require_pretrained: true
+  allow_partial_load: false
+  min_checkpoint_load_ratio: 1.0
+  # Fine-tuning uses a new causal/multi-view target, so initialize EMA teacher
+  # from the loaded student instead of inheriting a separate pretraining EMA lag.
+  copy_target_encoder_from_student: true
+  driving_condition_adapter: navsim
+  enable_trajectory_head: true
+  # Required for the intended staged recipe: initialize this NAVSIM finetune from
+  # the stage-1 video checkpoint. Entries are applied in order, so a later stage
+  # can be chained by appending to the list. This is model-only initialization,
+  # not trainer resume; leave the top-level checkpoint empty for finetune.
+  init_from_checkpoint:
+    - ${oc.env:STAGE1_CKPT,/path/to/stage1/checkpoints/step_24000}
+  require_init_from_checkpoint: true
+  init_checkpoint_allow_partial: true
+  variant: vjepa2_1_vit_large_384
+  use_rope: true
+  use_sdpa: true
+  interpolate_rope: true
+  modality_embedding: true
+  img_temporal_dim_size: 1
+  use_activation_checkpointing: false
+
+  camera_names: [cam_l0, cam_f0, cam_r0, cam_b0]
+  input_hw: [256, 512]
+  pretrained_input_hw: [256, 256]
+  image_normalization: minus_one_to_imagenet
+  image_mean: [0.485, 0.456, 0.406]
+  image_std: [0.229, 0.224, 0.225]
+  num_history_frames: 4
+  num_future_frames: 8
+  patch_size: 16
+  tubelet_size: 2
+
+  mv_scene_dim: 512
+  # Lightweight scene projector: only LayerNorm + Linear to mv_scene_dim.
+  # Camera/time/spatial embeddings and output norm live inside the predictor.
+  flow_hidden_dim: 512
+  flow_num_layers: 12
+  flow_num_heads: 8
+  traj_loss_grad_to_scene_flow: true
+  scene_loss_grad_to_traj_flow: false
+  num_inference_steps: 12
+  flow_time_sampling: logit_normal
+  flow_logit_mean: -0.2
+  flow_logit_std: 1.6
+  full_mask_prob: 1.0
+  jepa_mask_configs:
+    - num_blocks: 8
+      spatial_scale: [0.15, 0.15]
+      temporal_scale: [1.0, 1.0]
+      aspect_ratio: [0.75, 1.5]
+  flow_inference_noise_scale: 1.0
+  flow_inference_seed: 0
+  dynamic_collapse_topk: 64
+  trajectory_norm_mean: [31.8, 1.32, 0.095]
+  trajectory_norm_std: [33.37, 21.0, 1.765]
+
+  ema_start: 0.99925
+  ema_end: 0.99925
+  # Use the V-JEPA-style linear EMA schedule. Start/end are intentionally equal
+  # for now, so the numerical momentum remains the official 0.99925.
+  ema_total_steps: 80600
+  # NAVSIM finetune starts from NuPlan-trained scene/predictor weights, so it
+  # does not need extra EMA warmup or an encoder no-grad stabilization phase.
+  target_scene_ema_warmup_steps: 0
+  freeze_encoder_steps: 0
+
+  trajectory_horizon: 8
+  ego_status_dim: 8
+
+trainer:
+  batch_size_per_gpu: 4
+  gradient_accumulation_steps: 1
+  dist_timeout_sec: 3600
+  max_epochs: 200
+  max_steps: 0
+  eval_only: false
+
+  learning_rate:
+    base: 0.0001
+    encoder: 0.00001
+    scene_projector: 0.0001
+    predictor: 0.00015
+
+  lr_warmup_ratio: 0.05
+  gradient_clipping: 1.0
+  weight_decay: 0.04
+  freeze_modules:
+
+  losses:
+    loss_jepa_pred:
+      weight: 0.5
+    loss_traj:
+      weight: 1.0
+
+  log_interval: 20
+  eval_interval: 0.05
+  eval_max_batches: 20
+  # Validation runs on a held-out slice of navtrain (data.navsim_val_holdout_ratio), so the
+  # selection metric is a loss the model returns, not a NAVSIM score.
+  best_metric: val_active_traj_xpred_mse
+  best_mode: min
+  allow_best_metric_fallback: false
+  save_checkpoint_every_epoch: false
+  save_checkpoint_steps: []
+
+  mixed_precision: "bf16"
+  deepspeed_config: configs/deepspeed/ds_zero2_bf16.json
+
+  # Training validates on a held-out slice of navtrain only. There is no in-training
+  # scoring of navtest: score it once, after training, with
+  # scripts/evaluation/run_navsim_pdms.sh or run_navsim_epdms.sh.
+
+data:
+  dataset: NAVSIM_OFFICIAL
+  navsim_log_path: "${oc.env:OPENSCENE_DATA_ROOT}/navsim_logs/trainval"
+  sensor_blobs_path: "${oc.env:OPENSCENE_DATA_ROOT}/sensor_blobs/trainval"
+  train_scene_filter_yaml: "${oc.env:NAVSIM_DEVKIT_ROOT}/navsim/planning/script/config/common/train_test_split/scene_filter/navtrain.yaml"
+  # Validation is a held-out 5% of navtrain's logs, selected by a hash of the log name so
+  # the two sides are exact complements and do not move between runs. navtrain and navtest
+  # share no logs, so pointing val at navtest would make validation a test-set run.
+  val_scene_filter_yaml:
+  navsim_val_holdout_ratio: 0.05
+  frame_height: 256
+  frame_width: 512
+  dataloader_num_workers: 6
+  val_dataloader_num_workers: 6
+  dataloader_prefetch_factor: 2
+  dataloader_pin_memory: true
+  dataloader_persistent_workers: true
+  num_future_frames: 8
+  num_history_image_frames: 4
+  num_history_trajectory_steps: 4
+  trajectory_frame_rate_hz: 2.0
+  camera_names: [cam_l0, cam_f0, cam_r0, cam_b0]
+  camera_name: cam_f0

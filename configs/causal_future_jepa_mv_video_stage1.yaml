@@ -1,0 +1,141 @@
+seed: 42
+tf32: true
+save_root: ${oc.env:WM_SAVE_ROOT,/path/to/experiments}
+name: causal_future_jepa_mv_nuplan_video_stage1
+experiment_name: vjepa21_vitl16_4cam_nuplan_scene512_flow512_l12_xpred_video_4hist_8future
+experiment_tracker: none
+
+checkpoint:
+
+model:
+  target: models.multiview_causal_future_jepa:MultiViewCausalFutureMaskedJEPA
+  dtype: bfloat16
+
+  vjepa2_ckpt: ${oc.env:VJEPA2_CKPT,/path/to/vjepa2_1_vitl_dist_vitG_384.pt}
+  require_pretrained: true
+  allow_partial_load: false
+  min_checkpoint_load_ratio: 1.0
+  # NuPlan video warmup changes the prediction target from official V-JEPA, so
+  # start the EMA teacher as an exact copy of the loaded student encoder.
+  copy_target_encoder_from_student: true
+  driving_condition_adapter: navsim
+  enable_trajectory_head: false
+  init_from_checkpoint:
+  init_checkpoint_allow_partial: true
+  variant: vjepa2_1_vit_large_384
+  use_rope: true
+  use_sdpa: true
+  interpolate_rope: true
+  modality_embedding: true
+  img_temporal_dim_size: 1
+  use_activation_checkpointing: false
+
+  camera_names: [cam_l0, cam_f0, cam_r0, cam_b0]
+  input_hw: [256, 512]
+  pretrained_input_hw: [256, 256]
+  image_normalization: minus_one_to_imagenet
+  image_mean: [0.485, 0.456, 0.406]
+  image_std: [0.229, 0.224, 0.225]
+  num_history_frames: 4
+  num_future_frames: 8
+  patch_size: 16
+  tubelet_size: 2
+
+  mv_scene_dim: 512
+  # Lightweight scene projector: only LayerNorm + Linear to mv_scene_dim.
+  # Camera/time/spatial embeddings and output norm live inside the predictor.
+  flow_hidden_dim: 512
+  flow_num_layers: 12
+  flow_num_heads: 8
+  traj_loss_grad_to_scene_flow: false
+  scene_loss_grad_to_traj_flow: false
+  num_inference_steps: 12
+  flow_time_sampling: logit_normal
+  flow_logit_mean: -0.2
+  flow_logit_std: 1.6
+  full_mask_prob: 0.5
+  jepa_mask_configs:
+    - num_blocks: 8
+      spatial_scale: [0.15, 0.15]
+      temporal_scale: [1.0, 1.0]
+      aspect_ratio: [0.75, 1.5]
+  flow_inference_noise_scale: 1.0
+  flow_inference_seed: 0
+  dynamic_collapse_topk: 64
+
+  ema_start: 0.99925
+  ema_end: 0.99925
+  # Use the V-JEPA-style linear EMA schedule. Start/end are intentionally equal
+  # for now, so the numerical momentum remains the official 0.99925.
+  ema_total_steps: 80600
+  # Extra linear EMA warmup for newly initialized non-backbone target modules.
+  # Currently this applies to target_scene_projector only, not the V-JEPA encoder.
+  target_scene_ema_warmup_start: 0.995
+  target_scene_ema_warmup_steps: 20000
+  # NuPlan warmup stage: keep the original V-JEPA student encoder no-grad for
+  # the first 20k optimizer steps; scene projector and flow predictor still train.
+  freeze_encoder_steps: 25000
+
+trainer:
+  batch_size_per_gpu: 4
+  gradient_accumulation_steps: 1
+  dist_timeout_sec: 3600
+  max_epochs: 15
+  max_steps: 0
+  eval_only: false
+
+  learning_rate:
+    base: 0.0001
+    encoder: 0.00001
+    scene_projector: 0.0003
+    predictor: 0.00035
+
+  lr_warmup_ratio: 0.05
+  gradient_clipping: 1.0
+  weight_decay: 0.04
+  freeze_modules:
+
+  losses:
+    loss_jepa_pred:
+      weight: 1.0
+
+  log_interval: 20
+  eval_interval: 0.05
+  eval_max_batches: 20
+  best_metric: val_active_scene_xpred_mse
+  best_mode: min
+  allow_best_metric_fallback: false
+  save_checkpoint_every_epoch: false
+  save_checkpoint_steps: [24000]
+
+  mixed_precision: "bf16"
+  deepspeed_config: configs/deepspeed/ds_zero2_bf16.json
+
+
+data:
+  dataset: NUPLAN
+  nuplan_data_root: "${oc.env:NUPLAN_DATA_ROOT,/path/to/nuplan}"
+  nuplan_split: train
+  nuplan_cameras: [CAM_L0, CAM_F0, CAM_R0, CAM_B0]
+  nuplan_primary_camera: CAM_F0
+  camera_names: [cam_l0, cam_f0, cam_r0, cam_b0]
+  nuplan_anchor_stride: 3
+  nuplan_split_ratio: 0.95
+  # This runs inside every distributed rank. Keep it below CPU_per_node / local_ranks
+  # to avoid spawning hundreds of index workers per node during multi-node startup.
+  nuplan_index_build_workers: 16
+  nuplan_camera_time_tolerance_us: 50000
+
+  frame_height: 256
+  frame_width: 512
+  dataloader_num_workers: 6
+  val_dataloader_num_workers: 6
+  dataloader_prefetch_factor: 2
+  dataloader_pin_memory: true
+  dataloader_persistent_workers: true
+  num_future_frames: 8
+  num_history_image_frames: 4
+  # The current NuPlan loader still uses trajectory windows to build samples;
+  # model.enable_trajectory_head=false keeps those fields out of the model/loss.
+  num_history_trajectory_steps: 4
+  trajectory_frame_rate_hz: 2.0

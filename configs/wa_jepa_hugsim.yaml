@@ -1,0 +1,96 @@
+# WA-JEPA closed-loop inference preset for the HUGSIM benchmark.
+#
+# Architecture is identical to `wa_jepa_navsim_epdms.yaml`; the same checkpoint is
+# used for both. Only two things differ:
+#   * `vjepa2_ckpt` / `require_pretrained` are disabled. Closed-loop inference
+#     restores the full trained state dict, so reading the V-JEPA 2.1 pretrained
+#     weights first would only waste several GB of I/O per scenario (436 scenarios
+#     x 4 GPUs makes that measurable) and fail outright if the path is unset.
+#   * A `hugsim:` block records the simulator adapter constants. They are config,
+#     not code, because getting any one of them wrong lowers the score silently
+#     instead of raising.
+seed: 42
+tf32: true
+checkpoint:
+model:
+  target: models.multiview_causal_future_jepa:MultiViewCausalFutureMaskedJEPA
+  dtype: bfloat16
+  vjepa2_ckpt:
+  require_pretrained: false
+  allow_partial_load: false
+  min_checkpoint_load_ratio: 1.0
+  copy_target_encoder_from_student: true
+  driving_condition_adapter: navsim
+  enable_trajectory_head: true
+  init_from_checkpoint:
+  require_init_from_checkpoint: false
+  init_checkpoint_allow_partial: false
+  variant: vjepa2_1_vit_large_384
+  use_rope: true
+  use_sdpa: true
+  interpolate_rope: true
+  modality_embedding: true
+  img_temporal_dim_size: 1
+  use_activation_checkpointing: false
+  camera_names: [cam_l0, cam_f0, cam_r0, cam_b0]
+  input_hw: [256, 512]
+  pretrained_input_hw: [256, 256]
+  image_normalization: minus_one_to_imagenet
+  image_mean: [0.485, 0.456, 0.406]
+  image_std: [0.229, 0.224, 0.225]
+  num_history_frames: 4
+  num_future_frames: 8
+  patch_size: 16
+  tubelet_size: 2
+  mv_scene_dim: 512
+  flow_hidden_dim: 512
+  flow_num_layers: 12
+  flow_num_heads: 8
+  traj_loss_grad_to_scene_flow: true
+  scene_loss_grad_to_traj_flow: false
+  num_inference_steps: 12
+  flow_time_sampling: logit_normal
+  flow_logit_mean: -0.2
+  flow_logit_std: 1.6
+  full_mask_prob: 1.0
+  flow_inference_noise_scale: 1.0
+  flow_inference_seed: 1
+  dynamic_collapse_topk: 64
+  trajectory_norm_mean: [31.8, 1.32, 0.095]
+  trajectory_norm_std: [33.37, 21.0, 1.765]
+  trajectory_horizon: 8
+  ego_status_dim: 8
+data:
+  dataset: NAVSIM_OFFICIAL
+  frame_height: 256
+  frame_width: 512
+  num_future_frames: 8
+  num_history_image_frames: 4
+  num_history_trajectory_steps: 4
+  trajectory_frame_rate_hz: 2.0
+  camera_names: [cam_l0, cam_f0, cam_r0, cam_b0]
+  camera_name: cam_f0
+hugsim:
+  # Model camera slot -> HUGSIM camera name. The model identifies cameras by an
+  # embedding indexed by *list position* (SceneInputPositioner.camera_embed), so
+  # this mapping must stay aligned with `model.camera_names` entry by entry.
+  # HUGSIM also renders CAM_BACK_LEFT / CAM_BACK_RIGHT; the model has no slot for
+  # them and they are dropped.
+  camera_map:
+    cam_l0: CAM_FRONT_LEFT
+    cam_f0: CAM_FRONT
+    cam_r0: CAM_FRONT_RIGHT
+    cam_b0: CAM_BACK
+  # Simulator step, seconds (HUGSIM sim/hug_sim.py). The model consumes and emits
+  # poses every 1 / data.trajectory_frame_rate_hz seconds, so the history buffer is
+  # strided by round(0.5 / 0.25) = 2 frames.
+  sim_dt_s: 0.25
+  # HUGSIM command -> NAVSIM driving command, indexed by the HUGSIM value.
+  # HUGSIM: 0 = right, 1 = left, 2 = straight. NAVSIM: 0 = left, 1 = straight,
+  # 2 = right. Measured from the per-frame yaw deltas of 19 scenes, not read off a
+  # doc: an inverted mapping produces a model that steers the wrong way without
+  # ever raising.
+  command_map: [2, 0, 1]
+  # closed_loop.py terminates a rollout at `cnt > 400`; that path prints nothing,
+  # so the aggregator needs the number to infer a step-limit termination.
+  step_limit: 400
