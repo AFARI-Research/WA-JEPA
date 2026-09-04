@@ -55,7 +55,7 @@ model:
   flow_num_heads: 8
   traj_loss_grad_to_scene_flow: true
   scene_loss_grad_to_traj_flow: false
-  num_inference_steps: 12
+  num_inference_steps: 4
   flow_time_sampling: logit_normal
   flow_logit_mean: -0.2
   flow_logit_std: 1.6
